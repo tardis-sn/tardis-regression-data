@@ -545,8 +545,14 @@ class ReferenceComparer:
                 if value > 0:
                     diff_data = results["identical_name_different_data_dfs"]
                     keys = list(diff_data.keys())
-                    # Calculate max relative difference for each key, handling NaN values
-                    rel_diffs = [diff_data[key].abs().fillna(0).max().max() for key in keys]
+                    rel_diffs = []
+                    for key in keys:
+                        df = diff_data[key]
+                        if isinstance(df, pd.Series):
+                            max_diff = df.abs().fillna(0).max()
+                        else:
+                            max_diff = df.abs().fillna(0).max().max()
+                        rel_diffs.append(max_diff)
                     data.append((name, value, keys, rel_diffs))
             else:  # "different keys"
                 value = results.get("different_keys", 0)
