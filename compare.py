@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 CONFIG = {
-    'compare_path': '.', 
+    'compare_path': '.',  # Default to current directory
     'temp_dir_prefix': 'ref_compare_',
 }
 
@@ -54,8 +54,9 @@ def get_last_two_commits():
         return None, None
 
 class FileManager:
-    def __init__(self):
+    def __init__(self, repo_path=None):
         self.temp_dir = None
+        self.repo_path = Path(repo_path) if repo_path else Path(CONFIG['compare_path'])
 
     def setup(self):
         self.temp_dir = Path(tempfile.mkdtemp(prefix=CONFIG['temp_dir_prefix']))
@@ -78,6 +79,7 @@ class FileSetup:
         self.file_manager = file_manager
         self.ref1_hash = ref1_hash
         self.ref2_hash = ref2_hash
+        self.repo_path = file_manager.repo_path
 
     def setup(self):
         for ref_id, ref_hash in enumerate([self.ref1_hash, self.ref2_hash], 1):
@@ -86,10 +88,10 @@ class FileSetup:
             if ref_hash:
                 self._copy_data_from_hash(ref_hash, ref_dir)
             else:
-                subprocess.run(f'cp -r {CONFIG["compare_path"]}/* {ref_dir}', shell=True)
+                subprocess.run(f'cp -r {self.repo_path}/* {ref_dir}', shell=True)
 
     def _copy_data_from_hash(self, ref_hash, ref_dir):
-        git_cmd = ['git', 'archive', ref_hash, '|', 'tar', '-x', '-C', str(ref_dir)]
+        git_cmd = ['git', '-C', str(self.repo_path), 'archive', ref_hash, '|', 'tar', '-x', '-C', str(ref_dir)]
         subprocess.run(' '.join(git_cmd), shell=True)
 
 class DiffAnalyzer:
@@ -165,6 +167,10 @@ class HDFComparator:
         identical_name_different_data = []
         identical_name_different_data_dfs = {}
 
+        # Calculate added and deleted keys
+        added_keys = k2 - k1
+        deleted_keys = k1 - k2
+
         for item in k1 & k2:
             try:
                 if ref1[item].equals(ref2[item]):
@@ -186,6 +192,10 @@ class HDFComparator:
             print(f"Summary for {name}:")
             print(f"Total number of keys- in ref1: {len(k1)}, in ref2: {len(k2)}")
             print(f"Number of keys with different names in ref1 and ref2: {different_keys}")
+            if added_keys:
+                print(f"Keys added in ref2(k2-k1): {sorted(added_keys)}")
+            if deleted_keys:
+                print(f"Keys deleted from ref1(k1-k2): {sorted(deleted_keys)}")
             print(f"Number of keys with same name but different data in ref1 and ref2: {len(identical_name_different_data)}")
             print(f"Number of totally same keys: {len(identical_items)}")
             print("=" * 50)  # Add another separator line after the summary
@@ -197,7 +207,9 @@ class HDFComparator:
             "identical_keys_diff_data": len(identical_name_different_data),
             "identical_name_different_data_dfs": identical_name_different_data_dfs,
             "ref1_keys": list(k1),
-            "ref2_keys": list(k2)
+            "ref2_keys": list(k2),
+            "added_keys": list(added_keys),
+            "deleted_keys": list(deleted_keys)
         }
 
     def _compare_and_display_differences(self, df1, df2, item, name, path1, path2):
@@ -453,13 +465,14 @@ class SpectrumSolverComparator:
         fig.show()
 
 class ReferenceComparer:
-    def __init__(self, ref1_hash=None, ref2_hash=None, print_path=False):
+    def __init__(self, ref1_hash=None, ref2_hash=None, print_path=False, repo_path=None):
         assert not ((ref1_hash is None) and (ref2_hash is None)), "One hash can not be None"
         self.ref1_hash = ref1_hash
         self.ref2_hash = ref2_hash
         self.print_path = print_path
+        self.repo_path = Path(repo_path) if repo_path else Path(CONFIG['compare_path'])
         self.test_table_dict = {}
-        self.file_manager = FileManager()
+        self.file_manager = FileManager(repo_path)
         self.file_setup = None
         self.diff_analyzer = None
         self.hdf_comparator = None
@@ -532,8 +545,8 @@ class ReferenceComparer:
                 if value > 0:
                     diff_data = results["identical_name_different_data_dfs"]
                     keys = list(diff_data.keys())
-                    # Calculate max relative difference for each key
-                    rel_diffs = [diff_data[key].abs().max().max() for key in keys]
+                    # Calculate max relative difference for each key, handling NaN values
+                    rel_diffs = [diff_data[key].abs().fillna(0).max().max() for key in keys]
                     data.append((name, value, keys, rel_diffs))
             else:  # "different keys"
                 value = results.get("different_keys", 0)
@@ -555,9 +568,18 @@ class ReferenceComparer:
             if option == "different keys same name":
                 _, value, keys, rel_diffs = item
                 if rel_diffs:
-                    max_diff = max(rel_diffs)
-                    normalized_diffs = [diff / max_diff for diff in rel_diffs]
-                    colors = [pc.sample_colorscale('Blues', diff)[0] for diff in normalized_diffs]
+                    # Handle potential NaN or infinite values
+                    finite_diffs = [diff for diff in rel_diffs if np.isfinite(diff)]
+                    if finite_diffs:
+                        max_diff = max(finite_diffs)
+                        # Ensure we don't divide by zero and handle NaN/infinite values
+                        normalized_diffs = [
+                            min(1.0, (diff / max_diff if np.isfinite(diff) else 0.0))
+                            for diff in rel_diffs
+                        ]
+                        colors = [pc.sample_colorscale('Blues', diff)[0] for diff in normalized_diffs]
+                    else:
+                        colors = ['rgb(220, 220, 255)'] * len(keys)
                 else:
                     colors = ['rgb(220, 220, 255)'] * len(keys)
                     rel_diffs = [0] * len(keys)  # Set all differences to 0
