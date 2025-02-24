@@ -555,10 +555,14 @@ class ReferenceComparer:
                     rel_diffs = []
                     for key in keys:
                         df = diff_data[key]
-                        if isinstance(df, pd.Series):
-                            max_diff = df.abs().fillna(0).max()
-                        else:
-                            max_diff = df.abs().fillna(0).max().max()
+                        try:
+                            values = df.abs().fillna(0).values
+                            max_diff = float(np.nanmax(values))
+                            if not np.isfinite(max_diff):
+                                max_diff = 0.0
+                        except Exception as e:
+                            logger.warning(f"Error calculating diff for key {key}: {e}")
+                            max_diff = 0.0
                         rel_diffs.append(max_diff)
                     data.append((name, value, keys, rel_diffs))
             else:  # "different keys"
