@@ -252,9 +252,10 @@ class HDFComparator:
 
 
 class SpectrumSolverComparator:
-    def __init__(self, ref1_path, ref2_path):
+    def __init__(self, ref1_path, ref2_path, plot_dir=None):
         self.ref1_path = ref1_path
         self.ref2_path = ref2_path
+        self.plot_dir = plot_dir  # Add plot_dir parameter
         self.spectrum_keys = [
             'spectrum_integrated',
             'spectrum_real_packets',
@@ -330,6 +331,12 @@ class SpectrumSolverComparator:
         plt.suptitle('Comparison of Spectrum Solvers with Fractional Residuals', fontsize=16)
         plt.tight_layout()
         plt.subplots_adjust(top=0.95)
+
+        if os.environ.get('SAVE_COMP_IMG') == '1' and self.plot_dir:
+            filename = self.plot_dir / "spectrum.png"
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            print(f"Saved spectrum plot to {filename}")
+        
         plt.show()
 
     def plot_plotly(self):
@@ -658,16 +665,38 @@ class ReferenceComparer:
                 )
             )
 
+        if fig and os.environ.get('SAVE_COMP_IMG') == '1':
+            # Create shortened commit hashes
+            short_ref1 = self.ref1_hash[:6] if self.ref1_hash else "current"
+            short_ref2 = self.ref2_hash[:6] if self.ref2_hash else "current"
+            
+            # Create directory for comparison plots
+            plot_dir = Path(f"comparison_plots_{short_ref2}_new_{short_ref1}_old")
+            plot_dir.mkdir(exist_ok=True)
+            
+            # Save high-res image in the new directory
+            plot_type = "diff_keys" if option == "different keys" else "same_name_diff"
+            filename = plot_dir / f"{plot_type}.png"
+            fig.write_image(str(filename), scale=4, width=1200, height=800)
+            print(f"Saved plot to {filename}")
+        
         return fig
 
     def compare_testspectrumsolver_hdf(self, custom_ref1_path=None, custom_ref2_path=None):
         ref1_path = custom_ref1_path or Path(self.ref1_path) / "tardis/spectrum/tests/test_spectrum_solver/test_spectrum_solver/TestSpectrumSolver.h5"
         ref2_path = custom_ref2_path or Path(self.ref2_path) / "tardis/spectrum/tests/test_spectrum_solver/test_spectrum_solver/TestSpectrumSolver.h5"
         
-        comparator = SpectrumSolverComparator(ref1_path, ref2_path)
+        # Create plot directory first
+        plot_dir = None
+        if os.environ.get('SAVE_COMP_IMG') == '1':
+            short_ref1 = self.ref1_hash[:6] if self.ref1_hash else "current"
+            short_ref2 = self.ref2_hash[:6] if self.ref2_hash else "current"
+            plot_dir = Path(f"comparison_plots_{short_ref2}_new_{short_ref1}_old")
+            plot_dir.mkdir(exist_ok=True)
+        
+        # Pass plot_dir to SpectrumSolverComparator
+        comparator = SpectrumSolverComparator(ref1_path, ref2_path, plot_dir)
         comparator.setup()
-        
         comparator.plot_matplotlib()
-        
         comparator.plot_plotly()
 
