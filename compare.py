@@ -591,7 +591,7 @@ class ReferenceComparer:
                         max_diff = max(finite_diffs)
                         # Ensure we don't divide by zero and handle NaN/infinite values
                         normalized_diffs = [
-                            min(1.0, (diff / max_diff if np.isfinite(diff) else 0.0))
+                            min(1.0, (diff / max_diff if np.isfinite(diff) and max_diff > 0 else 0.0))
                             for diff in rel_diffs
                         ]
                         colors = [pc.sample_colorscale('Blues', diff)[0] for diff in normalized_diffs]
