@@ -3,7 +3,7 @@ name: Trigger Tardis LFS Cache
 on:
   workflow_dispatch:  # Allows manual triggering
   push:
-    branches: [ main ]
+    branches: '*'
   pull_request:
     branches: [ main ]
 
