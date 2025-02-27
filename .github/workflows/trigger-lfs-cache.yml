@@ -1,0 +1,19 @@
+name: Trigger Tardis LFS Cache
+
+on:
+  workflow_dispatch:  # Allows manual triggering
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  trigger-tardis-cache:
+    uses: tardis-sn/tardis/.github/workflows/lfs-cache.yml@main
+    permissions:
+      contents: read
+    secrets:
+      token: ${{ secrets.BOT_TOKEN }}  # Personal Access Token with workflow permissions
+    with:
+      atom-data-sparse: true  # Set to true to only download H_He data
+      allow_lfs_pull: false    # Allow LFS pull operations when cache miss occurs 
