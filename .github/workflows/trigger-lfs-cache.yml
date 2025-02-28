@@ -4,6 +4,8 @@ on:
   workflow_dispatch:  # Allows manual triggering
   push:
     branches: [ main ]
+    paths:
+      - 'tardis/**'
 
 
 jobs:
