@@ -12,6 +12,8 @@ jobs:
   trigger-tardis-cache:
     runs-on: ubuntu-latest
     steps:
+      # Uses the GitHub API for dispatching workflows
+      # see https://docs.github.com/en/rest/actions/workflows?apiVersion=2022-11-28#create-a-workflow-dispatch-event
       - name: Trigger LFS Cache Workflow
         run: |
           curl -L \
