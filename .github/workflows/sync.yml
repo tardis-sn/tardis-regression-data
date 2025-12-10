@@ -21,67 +21,97 @@ jobs:
       - name: Sync MSU → GitHub
         run: |
       - name: Calculate Missing Objects
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Create batch request using Python for robust parsing
           python3 -c '
-          import sys, json, os, subprocess
+          import sys, json, os, subprocess, urllib.request, urllib.error
           
+          token = os.environ.get("GITHUB_TOKEN")
+          repo = os.environ.get("GITHUB_REPOSITORY")
+          if not token or not repo:
+              print("::error::Missing GITHUB_TOKEN or GITHUB_REPOSITORY environment variables")
+              sys.exit(1)
+          
+          # 1. Get all LFS files from git index
           try:
               output = subprocess.check_output(["git", "lfs", "ls-files", "-l"], text=True)
           except subprocess.CalledProcessError:
+              print("No LFS files found (git lfs ls-files failed)")
               sys.exit(0)
               
-          objects = []
+          objects_map = {} # Map OID -> List of filenames
+          unique_objects = [] # List of unique dicts {oid, size} for API
+          
           for line in output.splitlines():
               parts = line.strip().split()
               if len(parts) < 3: continue
               oid = parts[0]
               path = " ".join(parts[2:])
               
-              if os.path.exists(path):
-                  with open(path, "r") as f:
-                      # Read size from pointer file
-                      for l in f:
-                          if l.startswith("size "):
-                              objects.append({"oid": oid, "size": int(l.split()[1])})
-                              break
+              if oid not in objects_map:
+                  objects_map[oid] = []
+                  # Read size from pointer file (only need to do this once per unique OID)
+                  size = 0
+                  if os.path.exists(path):
+                      with open(path, "r") as f:
+                          for l in f:
+                              if l.startswith("size "):
+                                  size = int(l.split()[1])
+                                  break
+                  unique_objects.append({"oid": oid, "size": size})
+              
+              objects_map[oid].append(path)
           
-          if not objects:
-              print("No LFS objects found", file=sys.stderr)
+          if not unique_objects:
+              print("No LFS objects to check.")
+              sys.exit(0)
+              
+          print(f"Checking {len(unique_objects)} unique LFS objects...")
           
-          print(json.dumps({"operation": "download", "transfers": ["basic"], "objects": objects}))
-          ' > batch.json
+          # 2. Query GitHub API in chunks (max 100 objects per request to avoid 413)
+          CHUNK_SIZE = 50
+          missing_oids = []
+          url = f"https://github.com/{repo}.git/info/lfs/objects/batch"
+          headers = {
+              "Content-Type": "application/vnd.git-lfs+json",
+              "Accept": "application/vnd.git-lfs+json",
+              "Authorization": f"Bearer {token}"
+          }
           
-          echo "=== DEBUG: batch.json content ==="
-          cat batch.json
-          echo "================================="
+          for i in range(0, len(unique_objects), CHUNK_SIZE):
+              chunk = unique_objects[i:i + CHUNK_SIZE]
+              data = json.dumps({"operation": "download", "transfers": ["basic"], "objects": chunk}).encode("utf-8")
+              req = urllib.request.Request(url, data=data, headers=headers)
+              
+              try:
+                  with urllib.request.urlopen(req) as resp:
+                      response = json.load(resp)
+                      for obj in response.get("objects", []):
+                          # Check if missing (error 404 or no download action)
+                          is_missing = False
+                          if "error" in obj:
+                              is_missing = True
+                          elif "actions" not in obj or "download" not in obj.get("actions", {}):
+                              is_missing = True
+                              
+                          if is_missing:
+                              oid = obj["oid"]
+                              missing_oids.append(oid)
+                              for fname in objects_map.get(oid, []):
+                                  print(f"::warning::Missing: {fname} (OID: {oid})")
+                                  
+              except urllib.error.HTTPError as e:
+                  print(f"::error::GitHub API Error {e.code}: {e.read().decode()}")
+                  sys.exit(1)
           
-          if [ "$(jq '.objects | length' batch.json)" -eq 0 ]; then
-             echo "No LFS objects found in repository."
-             touch missing.txt
-             exit 0
-          fi
-          
-          # Query GitHub to see what is already there
-          echo "Querying GitHub LFS API..."
-          curl -v -X POST https://github.com/${{ github.repository }}.git/info/lfs/objects/batch \
-            -H "Content-Type: application/vnd.git-lfs+json" \
-            -H "Accept: application/vnd.git-lfs+json" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -d @batch.json > response.json 2> curl_debug.log || true
-            
-          echo "=== DEBUG: curl stderr ==="
-          cat curl_debug.log
-          echo "=== DEBUG: GitHub API Response ==="
-          cat response.json
-          echo "=================================="
-          
-          if grep -q "Not Found" response.json || grep -q "404" response.json; then
-             echo "Error: GitHub LFS API returned 404. Check repository URL and permissions."
-             exit 1
-          fi
-          
-          jq -r '.objects[] | select(.error or (.actions.download == null)) | .oid' response.json > missing.txt
+          # 3. Write results
+          with open("missing.txt", "w") as f:
+              for oid in missing_oids:
+                  f.write(oid + "\n")
+                  
+          print(f"Total missing objects: {len(missing_oids)}")
+          '
 
       - name: Show Missing Files
         run: |
