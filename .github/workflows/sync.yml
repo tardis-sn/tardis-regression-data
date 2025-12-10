@@ -14,26 +14,85 @@ jobs:
           # ref: master
           lfs: false
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Sync MSU → GitHub
         run: |
-          # Get OIDs and create batch request
-          git lfs ls-files -l | awk '{printf "{\"oid\":\"%s\",\"size\":%d},", $1, $2}' | sed 's/,$//' > objs.json
-          echo "{\"operation\":\"download\",\"transfers\":[\"basic\"],\"objects\":[$(cat objs.json)]}" > batch.json
+      - name: Calculate Missing Objects
+        run: |
+          # Create batch request using Python for robust parsing
+          python3 -c '
+          import sys, json, os, subprocess
           
-          # Query GitHub for missing OIDs
+          try:
+              output = subprocess.check_output(["git", "lfs", "ls-files", "-l"], text=True)
+          except subprocess.CalledProcessError:
+              sys.exit(0)
+              
+          objects = []
+          for line in output.splitlines():
+              parts = line.strip().split()
+              if len(parts) < 3: continue
+              oid = parts[0]
+              path = " ".join(parts[2:])
+              
+              if os.path.exists(path):
+                  with open(path, "r") as f:
+                      # Read size from pointer file
+                      for l in f:
+                          if l.startswith("size "):
+                              objects.append({"oid": oid, "size": int(l.split()[1])})
+                              break
+          
+          print(json.dumps({"operation": "download", "transfers": ["basic"], "objects": objects}))
+          ' > batch.json
+          
+          # Query GitHub to see what is already there
           curl -sX POST https://github.com/${{ github.repository }}.git/info/lfs/objects/batch \
             -H "Content-Type: application/vnd.git-lfs+json" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -d @batch.json | \
             jq -r '.objects[] | select(.error or (.actions.download == null)) | .oid' > missing.txt
+
+      - name: Show Missing Files
+        run: |
+          if [ ! -s missing.txt ]; then
+            echo "GitHub is already up to date!"
+            exit 0
+          fi
           
-          # Fetch only missing objects from MSU
-          git config lfs.url https://tardis:tardis-2025-lfs@registry.moria.egr.msu.edu/repository/tardis-lfs/info/lfs
-          while read oid; do 
-            git lfs ls-files -l | awk -v o="$oid" '$1==o {print $3}' | xargs -I{} git lfs fetch origin --include={}
+          echo "Found $(wc -l < missing.txt | xargs) objects missing on GitHub:"
+          git lfs ls-files -l > lfs_map.txt
+          
+          while read oid; do
+            filename=$(grep "^$oid" lfs_map.txt | awk '{print $3}')
+            echo "$filename ($oid)"
           done < missing.txt
+
+      - name: Fetch from MSU
+        run: |
+          if [ ! -s missing.txt ]; then exit 0; fi
           
-          cat missing.txt
-          # Push to GitHub
-          # git config lfs.url https://github.com/${{ github.repository }}.git/info/lfs
-          # git lfs push origin master
+          git config lfs.url https://tardis:tardis-2025-lfs@registry.moria.egr.msu.edu/repository/tardis-lfs/info/lfs
+          
+          # Reuse lfs_map.txt
+          [ ! -f lfs_map.txt ] && git lfs ls-files -l > lfs_map.txt
+          
+          while read oid; do 
+            filename=$(grep "^$oid" lfs_map.txt | awk '{print $3}')
+            if [ -n "$filename" ]; then
+               echo "Fetching $filename"
+               git lfs fetch origin --include="$filename"
+            fi
+          done < missing.txt
+
+      # - name: Push to GitHub
+      #   run: |
+      #     if [ ! -s missing.txt ]; then exit 0; fi
+          
+      #     git config lfs.url https://github.com/${{ github.repository }}.git/info/lfs
+          
+      #     echo "Pushing $(wc -l < missing.txt | xargs) objects to GitHub..."
+      #     git lfs push origin master
