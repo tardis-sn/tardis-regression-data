@@ -46,15 +46,42 @@ jobs:
                               objects.append({"oid": oid, "size": int(l.split()[1])})
                               break
           
+          if not objects:
+              print("No LFS objects found", file=sys.stderr)
+          
           print(json.dumps({"operation": "download", "transfers": ["basic"], "objects": objects}))
           ' > batch.json
           
+          echo "=== DEBUG: batch.json content ==="
+          cat batch.json
+          echo "================================="
+          
+          if [ "$(jq '.objects | length' batch.json)" -eq 0 ]; then
+             echo "No LFS objects found in repository."
+             touch missing.txt
+             exit 0
+          fi
+          
           # Query GitHub to see what is already there
-          curl -sX POST https://github.com/${{ github.repository }}.git/info/lfs/objects/batch \
+          echo "Querying GitHub LFS API..."
+          curl -v -X POST https://github.com/${{ github.repository }}.git/info/lfs/objects/batch \
             -H "Content-Type: application/vnd.git-lfs+json" \
+            -H "Accept: application/vnd.git-lfs+json" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -d @batch.json | \
-            jq -r '.objects[] | select(.error or (.actions.download == null)) | .oid' > missing.txt
+            -d @batch.json > response.json 2> curl_debug.log || true
+            
+          echo "=== DEBUG: curl stderr ==="
+          cat curl_debug.log
+          echo "=== DEBUG: GitHub API Response ==="
+          cat response.json
+          echo "=================================="
+          
+          if grep -q "Not Found" response.json || grep -q "404" response.json; then
+             echo "Error: GitHub LFS API returned 404. Check repository URL and permissions."
+             exit 1
+          fi
+          
+          jq -r '.objects[] | select(.error or (.actions.download == null)) | .oid' response.json > missing.txt
 
       - name: Show Missing Files
         run: |
