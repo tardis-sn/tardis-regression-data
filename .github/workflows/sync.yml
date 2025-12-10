@@ -1,0 +1,37 @@
+name: Sync Master LFS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # ref: master
+          lfs: false
+
+      - name: Sync MSU → GitHub
+        run: |
+          # Get OIDs and create batch request
+          git lfs ls-files -l | awk '{printf "{\"oid\":\"%s\",\"size\":%d},", $1, $2}' | sed 's/,$//' > objs.json
+          echo "{\"operation\":\"download\",\"transfers\":[\"basic\"],\"objects\":[$(cat objs.json)]}" > batch.json
+          
+          # Query GitHub for missing OIDs
+          curl -sX POST https://github.com/${{ github.repository }}.git/info/lfs/objects/batch \
+            -H "Content-Type: application/vnd.git-lfs+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -d @batch.json | \
+            jq -r '.objects[] | select(.error or (.actions.download == null)) | .oid' > missing.txt
+          
+          # Fetch only missing objects from MSU
+          git config lfs.url https://tardis:tardis-2025-lfs@registry.moria.egr.msu.edu/repository/tardis-lfs/info/lfs
+          while read oid; do 
+            git lfs ls-files -l | awk -v o="$oid" '$1==o {print $3}' | xargs -I{} git lfs fetch origin --include={}
+          done < missing.txt
+          
+          cat missing.txt
+          # Push to GitHub
+          # git config lfs.url https://github.com/${{ github.repository }}.git/info/lfs
+          # git lfs push origin master
