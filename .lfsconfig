@@ -1,0 +1,5 @@
+[lfs]
+  url = https://tardis:tardis-2025-lfs@registry.moria.egr.msu.edu/repository/tardis-lfs/info/lfs
+
+[lfs "https://registry.moria.egr.msu.edu/repository/tardis-lfs/info/lfs"]
+  access = basic
