@@ -1,0 +1,51 @@
+atom_data: merged_mod_20SNG_forbidden_yg_fix_H30_cmfgen_yg.h5
+model:
+  abundances:
+    type: uniform
+    H: 0.7
+    He: 0.3
+  structure:
+    filename: ctardis_hydrogen_helium_structure.dat
+    filetype: simple_ascii
+    type: file
+    v_inner_boundary: 8000 km/s
+    v_outer_boundary: 10000 km/s
+montecarlo:
+  black_body_sampling:
+    num: 100000.0
+    start: 1 angstrom
+    stop: 1000000 angstrom
+  convergence_criteria:
+    damping_constant: 1.0
+    fraction: 0.8
+    hold: 3
+    t_inner:
+      damping_constant: 0.5
+    threshold: 0.05
+    type: specific
+  iterations: 2
+  last_no_of_packets: 200000.0
+  no_of_packets: 200000.0
+  no_of_virtual_packets: 0
+  nthreads: 1
+  seed: 23111963
+plasma:
+  continuum_treatment: true
+  disable_electron_scattering: false
+  excitation: dilute-lte
+  initial_t_inner: 8000 K
+  initial_t_rads: 7807.92094872 K
+  ionization: nlte
+  line_interaction_type: macroatom
+  nlte:
+    species:
+    - H I
+  radiative_rates_type: dilute-blackbody
+spectrum:
+  num: 12500
+  start: 500 angstrom
+  stop: 25000 angstrom
+supernova:
+  luminosity_requested: 5.0e+42 erg/s
+  time_explosion: 16.0 day
+tardis_config_version: v1.0
